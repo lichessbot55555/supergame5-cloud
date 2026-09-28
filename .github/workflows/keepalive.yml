@@ -18,28 +18,46 @@ jobs:
   keepalive:
     runs-on: ubuntu-latest
     steps:
-      - name: Restart bot if it is not running
+      - name: Supervisor — check Lichess status and manage bot
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          RUNS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/runs?per_page=10")
+          BOT=supergame5
+          STATUS=$(curl -s "https://lichess.org/api/users/status?ids=$BOT")
+          echo "Lichess отвечает: $STATUS"
+          if echo "$STATUS" | grep -q '"online":true'; then
+            echo "Бот ОНЛАЙН — игрой уже управляет локальный ПК или облако. Ничего не делаю."
+            exit 0
+          fi
+          echo "Бот ОФЛАЙН — проверяю облачные запуски..."
+          RUNS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/runs?per_page=5")
           if [ -z "$RUNS" ]; then
             echo "::error::Не удалось получить список запусков"
             exit 1
           fi
-          LIVE=$(echo "$RUNS" | grep -c '"status": "in_progress"' || true)
-          QUEUED=$(echo "$RUNS" | grep -c '"status": "queued"' || true)
-          echo "Активных запусков: $LIVE, в очереди: $QUEUED"
-          if [ "$LIVE" -eq 0 ] && [ "$QUEUED" -eq 0 ]; then
-            echo "Бот не запущен — запускаю..."
+          INFO=$(echo "$RUNS" | python3 -c "import json,sys; d=json.load(sys.stdin); r=[x for x in d.get('workflow_runs',[]) if x['status'] in ('in_progress','queued','waiting')]; print(str(r[0]['id'])+','+r[0]['run_started_at'] if r else ',')")
+          LIVE_ID=$(echo "$INFO" | cut -d',' -f1)
+          STARTED=$(echo "$INFO" | cut -d',' -f2)
+          if [ -z "$LIVE_ID" ]; then
+            echo "Активных запусков нет — запускаю бота в облаке"
             CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/dispatches" -d '{"ref":"main"}')
             echo "HTTP-ответ: $CODE"
             if [ "$CODE" != "204" ]; then
               echo "::error::Не удалось запустить бота (HTTP $CODE)"
               exit 1
             fi
-            echo "Бот запущен заново!"
+            echo "Облачный бот запущен!"
           else
-            echo "Бот уже работает — всё хорошо"
+            DIFF=$(( $(date +%s) - $(date -d "$STARTED" +%s) ))
+            echo "Есть активный запуск $LIVE_ID, работает $DIFF сек"
+            if [ $DIFF -gt 420 ]; then
+              echo "Бот офлайн более 7 минут при живом запуске — перезапускаю облако"
+              curl -s -o /dev/null -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/runs/$LIVE_ID/cancel"
+              sleep 5
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/dispatches" -d '{"ref":"main"}')
+              echo "HTTP-ответ: $CODE"
+            else
+              echo "Запуск свежий — даём 2-3 минуты на старт, ничего не делаю"
+            fi
           fi
