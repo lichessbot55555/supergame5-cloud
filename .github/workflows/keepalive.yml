@@ -1,0 +1,32 @@
+name: Keepalive
+
+on:
+  schedule:
+    # Проверка каждые 20 минут: жив ли бот
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restart bot if it is not running
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ACTIVE=$(gh run list --workflow=bot-runner.yml --status in_progress --json databaseId --jq 'length')
+          QUEUED=$(gh run list --workflow=bot-runner.yml --status queued --json databaseId --jq 'length')
+          if [ "$ACTIVE" -eq 0 ] && [ "$QUEUED" -eq 0 ]; then
+            echo "Бот не запущен — запускаю..."
+            gh workflow run bot-runner.yml
+          else
+            echo "Бот уже работает (активных: $ACTIVE, в очереди: $QUEUED)"
+          fi

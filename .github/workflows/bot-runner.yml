@@ -1,0 +1,74 @@
+name: Lichess Bot Runner
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Резервный перезапуск каждые 6 часов (основной — keepalive)
+    - cron: "17 */6 * * *"
+
+concurrency:
+  group: bot-runner
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    # Лимит GitHub — 6 часов на джобу, встаём чуть раньше лимита,
+    # затем keepalive запустит бота заново (простой 1-3 минуты)
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lichess-bot bridge
+        run: |
+          git clone --depth 1 https://github.com/lichess-bot-devs/lichess-bot.git bridge
+          pip install -r bridge/requirements.txt
+
+      - name: Download Stockfish 19
+        run: |
+          mkdir -p engines
+          curl -sL https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-linux-x86-64-universal.tar.gz -o sf19.tar.gz
+          tar -xzf sf19.tar.gz
+          SF_BIN=$(find . -type f -name 'stockfish*' ! -name '*.tar.gz' ! -path './engines/*' | head -n 1)
+          mv "$SF_BIN" engines/stockfish
+          chmod +x engines/stockfish
+          rm -f sf19.tar.gz
+          echo "=== Проверка версии движка ==="
+          printf 'uci\nquit\n' | engines/stockfish | grep "id name"
+
+      - name: Download Fairy-Stockfish (chess variants)
+        run: |
+          curl -sL https://github.com/fairy-stockfish/Fairy-Stockfish/releases/download/fairy_sf_14/fairy-stockfish-largeboard_x86-64 -o engines/fairy-stockfish
+          chmod +x engines/fairy-stockfish
+
+      - name: Prepare config with token
+        env:
+          LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
+        run: |
+          if [ -z "$LICHESS_TOKEN" ]; then
+            echo "::error::Секрет LICHESS_TOKEN не задан! Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+          sed "s|__LICHESS_TOKEN__|${LICHESS_TOKEN}|" config.yml.template > config.yml
+
+      - name: Run bot
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python bridge/lichess-bot.py -c config.yml
+
+      - name: Upload game records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-records-${{ github.run_number }}
+          path: game_records/
+          retention-days: 14
+          if-no-files-found: ignore
