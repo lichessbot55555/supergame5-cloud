@@ -21,12 +21,25 @@ jobs:
       - name: Restart bot if it is not running
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          ACTIVE=$(gh run list --workflow=bot-runner.yml --status in_progress --json databaseId --jq 'length')
-          QUEUED=$(gh run list --workflow=bot-runner.yml --status queued --json databaseId --jq 'length')
-          if [ "$ACTIVE" -eq 0 ] && [ "$QUEUED" -eq 0 ]; then
+          RUNS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/runs?per_page=10")
+          if [ -z "$RUNS" ]; then
+            echo "::error::Не удалось получить список запусков"
+            exit 1
+          fi
+          LIVE=$(echo "$RUNS" | grep -c '"status": "in_progress"' || true)
+          QUEUED=$(echo "$RUNS" | grep -c '"status": "queued"' || true)
+          echo "Активных запусков: $LIVE, в очереди: $QUEUED"
+          if [ "$LIVE" -eq 0 ] && [ "$QUEUED" -eq 0 ]; then
             echo "Бот не запущен — запускаю..."
-            gh workflow run bot-runner.yml
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/workflows/bot-runner.yml/dispatches" -d '{"ref":"main"}')
+            echo "HTTP-ответ: $CODE"
+            if [ "$CODE" != "204" ]; then
+              echo "::error::Не удалось запустить бота (HTTP $CODE)"
+              exit 1
+            fi
+            echo "Бот запущен заново!"
           else
-            echo "Бот уже работает (активных: $ACTIVE, в очереди: $QUEUED)"
+            echo "Бот уже работает — всё хорошо"
           fi
