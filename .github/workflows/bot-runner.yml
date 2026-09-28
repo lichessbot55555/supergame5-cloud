@@ -62,7 +62,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
         run: |
-          python bridge/lichess-bot.py -c config.yml
+          python bridge/lichess-bot.py --config config.yml
 
       - name: Upload game records
         if: always()
