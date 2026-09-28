@@ -12,8 +12,10 @@ engine:
   name: "fairy-stockfish"
   # Stockfish 19 — классика и Chess960 (скачивается при старте Actions)
   standard_chess_name: "stockfish"
-  # Тюнинг пули 30+0 перенесён из локального SuperGame5
-  bullet_move_time: 250
+  # Тюнинг пули 30+0 перенесён из локального SuperGame5.
+  # На 4-ядерном раннере лимит поднят 250->380: там каждый поток медленнее,
+  # поэтому ищем дольше, чтобы компенсировать нехватку ядер.
+  bullet_move_time: 380
   bullet_time_reserve: 1500
   bullet_time_divisor: 100
   bullet_ponder: true
@@ -86,8 +88,9 @@ engine:
   homemade_options:
 
   uci_options:
-    # Раннер ubuntu-latest: 4 vCPU / 16 GB RAM
-    Threads: 3
+    # Раннер ubuntu-latest: 4 vCPU / 16 GB RAM.
+    # 4 потока = максимум бесплатного GitHub (дома было 16, но тут потолок 4 ядра).
+    Threads: 4
     Hash: 2048
     Move Overhead: 200
     Skill Level: 20
