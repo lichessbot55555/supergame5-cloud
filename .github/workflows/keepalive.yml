@@ -1,10 +1,10 @@
 name: Keepalive
 
 on:
-  schedule:
-    # Гибрид: каждые 20 мин супервизор проверяет: бот онлайн → не трогает, офлайн → поднимает облако
-    - cron: "*/20 * * * *"
   workflow_dispatch:
+  # ⛔ ВЫКЛЮЧЕНО. Бот играет ТОЛЬКО с компа.
+  # schedule:
+  #   - cron: "*/20 * * * *"
 
 concurrency:
   group: keepalive
